@@ -1,54 +1,66 @@
+# scripts/run_all_subjects.py
+# Run full preprocessing for all subjects listed in subjects_stress.txt
+# Works locally and on PVC via DATA_ROOT env var.
+
 from pathlib import Path
-import subprocess
+import os
 import sys
+import subprocess
 
-SUBJECT_LIST = Path("data/processed/physionet_e4/subjects_stress.txt")
+# ---- Portable paths ----
+SCRIPT_DIR = Path(__file__).resolve().parent          # .../scripts
+PROJECT_ROOT = SCRIPT_DIR.parent                      # repo root
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", PROJECT_ROOT / "data"))
 
-SCRIPT_ALIGN = Path("scripts/preprocess_one_subject.py")
-SCRIPT_LABEL = Path("scripts/label_and_window_subject.py")
+PROCESSED_ROOT = DATA_ROOT / "processed" / "physionet_e4"
+SUBJECT_LIST = PROCESSED_ROOT / "subjects_stress.txt"
 
-def run(cmd):
-    return subprocess.run(cmd, capture_output=True, text=True)
+SCRIPT_ALIGN = SCRIPT_DIR / "preprocess_one_subject.py"
+SCRIPT_LABEL = SCRIPT_DIR / "label_and_window_subject.py"
+
+
+def run_checked(cmd, env):
+    print("\n>>", " ".join(cmd))
+    subprocess.check_call(cmd, env=env)
+
 
 def main():
+    if not SUBJECT_LIST.exists():
+        raise FileNotFoundError(
+            f"Missing subject list: {SUBJECT_LIST}\n"
+            f"Did you run scripts/make_subject_list.py with DATA_ROOT={DATA_ROOT}?"
+        )
+
     subjects = [s.strip() for s in SUBJECT_LIST.read_text().splitlines() if s.strip()]
+    print(f"DATA_ROOT: {DATA_ROOT}")
     print(f"Running full preprocessing for {len(subjects)} subjects...")
 
-    ok, fail = 0, 0
+    env = os.environ.copy()
+    env["DATA_ROOT"] = str(DATA_ROOT)
+
+    ok = 0
     failures = []
 
     for s in subjects:
         print(f"\n=== {s} ===")
+        try:
+            # 1) create aligned64
+            run_checked([sys.executable, str(SCRIPT_ALIGN), "--subject", s], env)
 
-        # 1) create aligned64
-        r1 = run([sys.executable, str(SCRIPT_ALIGN), "--subject", s])
-        if r1.returncode != 0:
-            fail += 1
-            failures.append((s, "align"))
-            print("FAILED at ALIGN")
-            print(r1.stdout)
-            print(r1.stderr)
-            continue
+            # 2) label + windows
+            run_checked([sys.executable, str(SCRIPT_LABEL), "--subject", s], env)
 
-        # 2) label + windows
-        r2 = run([sys.executable, str(SCRIPT_LABEL), "--subject", s])
-        if r2.returncode != 0:
-            fail += 1
-            failures.append((s, "label"))
-            print("FAILED at LABEL/WINDOW")
-            print(r2.stdout)
-            print(r2.stderr)
-            continue
-
-        ok += 1
-        print(r2.stdout.strip())
+            ok += 1
+        except Exception as e:
+            failures.append(s)
+            print(f"FAILED for {s}: {e}")
 
     print("\n====================")
-    print(f"Done. OK={ok}, FAIL={fail}")
+    print(f"Done. OK={ok}, FAIL={len(failures)}")
     if failures:
-        print("Failures:")
-        for s, stage in failures:
-            print(" ", s, stage)
+        print("Failures:", failures)
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()
