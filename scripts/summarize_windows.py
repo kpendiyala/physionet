@@ -1,19 +1,23 @@
 # scripts/summarize_windows.py
 # Summarize all processed *_windows.npz files and write summary.csv
+# Works locally and on PVC via DATA_ROOT env var.
 
 from pathlib import Path
 import csv
+import os
 import numpy as np
 
-WINDOW_DIR = Path("data/processed/physionet_e4/STRESS")
-OUT_CSV = Path("data/processed/physionet_e4/STRESS_summary.csv")
+SCRIPT_DIR = Path(__file__).resolve().parent          # .../scripts
+PROJECT_ROOT = SCRIPT_DIR.parent                      # repo root
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", PROJECT_ROOT / "data"))
+
+PROCESSED_ROOT = DATA_ROOT / "processed" / "physionet_e4"
+WINDOW_DIR = PROCESSED_ROOT / "STRESS"
+OUT_CSV = PROCESSED_ROOT / "STRESS_summary.csv"
+
 
 def summarize_one(npz_path: Path):
     d = np.load(npz_path, allow_pickle=True)
-    # Expected keys from your pipeline:
-    #   X: (N, 3840, 3)
-    #   Y: (N, 3840)
-    #   L: (N,)
     X = d["X"]
     L = d["L"]
 
@@ -35,6 +39,7 @@ def summarize_one(npz_path: Path):
         "n_channels": int(X.shape[2]),
     }
 
+
 def main():
     files = sorted(WINDOW_DIR.glob("*_windows.npz"))
     if not files:
@@ -42,19 +47,14 @@ def main():
 
     rows = []
     totals = {"windows_total": 0, "label0": 0, "label1": 0}
-    bad = []
 
     for f in files:
-        try:
-            row = summarize_one(f)
-            rows.append(row)
-            totals["windows_total"] += row["windows_total"]
-            totals["label0"] += row["label0"]
-            totals["label1"] += row["label1"]
-        except Exception as e:
-            bad.append((f.name, str(e)))
+        row = summarize_one(f)
+        rows.append(row)
+        totals["windows_total"] += row["windows_total"]
+        totals["label0"] += row["label0"]
+        totals["label1"] += row["label1"]
 
-    # Write CSV
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["subject", "windows_total", "label0", "label1", "frac_label1", "win_len", "n_channels"]
     with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
@@ -63,24 +63,16 @@ def main():
         for r in rows:
             w.writerow(r)
 
-    # Print summary
+    frac1 = totals["label1"] / totals["windows_total"] if totals["windows_total"] > 0 else 0.0
+    print(f"DATA_ROOT: {DATA_ROOT}")
     print(f"Found {len(files)} files.")
     print(f"Wrote: {OUT_CSV}")
-    if totals["windows_total"] > 0:
-        frac1 = totals["label1"] / totals["windows_total"]
-    else:
-        frac1 = 0.0
-
     print("Totals:")
     print(f"  windows_total = {totals['windows_total']}")
     print(f"  label0        = {totals['label0']}")
     print(f"  label1        = {totals['label1']}")
     print(f"  frac_label1   = {frac1:.4f}")
 
-    if bad:
-        print("\nWARNING: some files failed to read:")
-        for name, msg in bad:
-            print(" ", name, "->", msg)
 
 if __name__ == "__main__":
     main()
