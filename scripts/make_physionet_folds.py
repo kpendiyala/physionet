@@ -46,6 +46,7 @@ def main(windows_dir, folds_out_dir):
     # Deterministic ordering by subject id (safer than path ordering if you ever move files)
     subjects = sorted(subjects, key=lambda x: x[0])
     sids = [s[0] for s in subjects]
+    sid_to_int = {sid: i for i, sid in enumerate(sids)}
     print("Loaded subjects (sorted):", sids)
 
     # Write mapping: fold index -> subject id
@@ -63,11 +64,11 @@ def main(windows_dir, folds_out_dir):
         Y_train = np.concatenate([t[2] for t in train], axis=0)
         L_train = np.concatenate([t[3] for t in train], axis=0)
         S_train = np.concatenate(
-            [np.full((t[1].shape[0],), t[0], dtype=object) for t in train],
+            [np.full((t[1].shape[0],), sid_to_int[t[0]], dtype=np.int32) for t in train],
             axis=0
         )
 
-        S_test = np.full((X_test.shape[0],), test_sid, dtype=object)
+        S_test = np.full((X_test.shape[0],), sid_to_int[test_sid], dtype=np.int32)
 
         out_path = os.path.join(folds_out_dir, f"fold_{test_i}.npz")
         save_fold(out_path, X_train, Y_train, L_train, S_train, X_test, Y_test, L_test, S_test)
